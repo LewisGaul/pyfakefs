@@ -65,6 +65,7 @@ from pyfakefs.helpers import (
     to_bytes,
     PERM_EXE,
     PERM_DEF,
+    PERM_DEF_FILE,
     is_root,
     get_uid,
     get_gid,
@@ -1163,6 +1164,47 @@ class FakeOsModule:
         if gid != -1:
             file_object.st_gid = gid
 
+    def mkfifo(
+        self,
+        path: AnyStr,
+        mode: int = PERM_DEF_FILE,
+        *,
+        dir_fd: Optional[int] = None,
+    ) -> None:
+        """Create a FIFO (a named pipe) named 'path'.
+
+        Simulates a FIFO as a regular file, unlike the real os module.
+
+        Args:
+            path: (str) Name of the file to create.
+            mode: (int) Permissions to use and type of file to be created.
+                Default permissions are 0o666.  The umask is applied to this
+                mode.
+            dir_fd: If not `None`, the file descriptor of a directory,
+                with `path` being relative to this directory.
+
+        Raises:
+            OSError: If called with unsupported options or the file can not be
+                created.
+        """
+        if self.filesystem.is_windows_fs:
+            raise AttributeError("module 'os' has no attribute 'mkfifo'")
+
+        path = self._path_with_dir_fd(path, self.mkfifo, dir_fd)
+        head, tail = self.path.split(path)
+        if not tail:
+            if self.filesystem.exists(head, check_link=True):
+                self.filesystem.raise_os_error(errno.EEXIST, path)
+            self.filesystem.raise_os_error(errno.ENOENT, path)
+        if tail in (matching_string(tail, "."), matching_string(tail, "..")):
+            self.filesystem.raise_os_error(errno.ENOENT, path)
+        if self.filesystem.exists(path, check_link=True):
+            self.filesystem.raise_os_error(errno.EEXIST, path)
+        self.filesystem.add_object(
+            head,
+            FakeFile(tail, mode & ~self.filesystem.umask, filesystem=self.filesystem),
+        )
+
     def mknod(
         self,
         path: AnyStr,
@@ -1171,7 +1213,7 @@ class FakeOsModule:
         *,
         dir_fd: Optional[int] = None,
     ) -> None:
-        """Create a filesystem node named 'filename'.
+        """Create a filesystem node named 'path'.
 
         Does not support device special files or named pipes as the real os
         module does.
